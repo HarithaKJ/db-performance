@@ -1,0 +1,97 @@
+service: aws-python-project
+
+frameworkVersion: '2 || 3'
+provider:
+  name: aws
+  runtime: python3.8
+  lambdaHashingVersion: 20201221
+functions:
+  hello:
+    handler: python.handler.hello
+    runtime: python3.8
+    events:
+      - httpApi:
+          path: /poc-python
+          method: get
+  hello1:
+    handler: node/handler.testhandler
+    runtime: nodejs14.x
+    events:
+      - httpApi:
+          path: /poc-node
+          method: get
+resources:
+  Resources:
+    DbSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: 'Security Group created for db'
+        GroupName: 'TestPGDBSG'
+        VpcId: vpc-04a546ef213cd272a
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            CidrIp: 0.0.0.0/0
+            FromPort: 5432
+            ToPort: 5432
+    DBSubnetGroup:
+      Type: AWS::RDS::DBSubnetGroup
+      Properties:
+        DBSubnetGroupDescription: 'RDS required subnets in different availability zones'
+        SubnetIds:
+          - subnet-0f450384d21da9a81
+          - subnet-06cf8a304cfd3367e
+          - subnet-0d3799b4489d1a052
+    MyRDSSecret:
+      Type: 'AWS::SecretsManager::Secret'
+      Properties:
+        Name: MySecretForPOC
+        Description: "This secret has a dynamically generated secret password."
+        GenerateSecretString:
+          SecretStringTemplate: '{"username": "postgres"}'
+          GenerateStringKey: "password"
+          PasswordLength: 30
+          ExcludeCharacters: '"@/\'
+
+    DBInstance:
+      Type: AWS::RDS::DBInstance
+      Properties:
+        DBInstanceIdentifier: 'testdatabase'
+        DBInstanceClass: 'db.t3.micro'
+        AllocatedStorage: '20'
+        DBName: 'entitydatabase'
+        DBSubnetGroupName: !Ref DBSubnetGroup
+        VPCSecurityGroups:
+          - !Ref DbSecurityGroup
+        Engine: postgres
+        EngineVersion: '13.4'
+        MasterUsername: '{{resolve:secretsmanager:MySecretForPOC:SecretString:username}}'
+        MasterUserPassword: '{{resolve:secretsmanager:MySecretForPOC:SecretString:password}}'
+        PubliclyAccessible: true
+      DependsOn: MyRDSSecret
+      
+    SampleManagedPolicy:
+      Type: 'AWS::IAM::ManagedPolicy'
+      Properties:
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Sid: GetSecretValue
+              Effect: Allow
+              Action:
+                - 'secretsmanager:GetSecretValue'
+              Resource: '*'
+            - Sid: DescribeInstances
+              Effect: Allow
+              Action:
+                - 'rds:DescribeDBInstances'
+              Resource: '*'
+        Roles: 
+          - 'aws-python-project-dev-us-east-1-lambdaRole'
+plugins:
+  - serverless-python-requirements
+custom:
+  pythonRequirements:
+    dockerizePip: non-linux
+package:
+  exclude:
+    - venv/**
