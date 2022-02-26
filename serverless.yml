@@ -1,0 +1,99 @@
+service: uptogether-db-perf-test
+
+frameworkVersion: '2 || 3'
+
+plugins:
+  - serverless-python-requirements
+  - serverless-offline
+
+provider:
+  name: aws
+  runtime: python3.8
+  lambdaHashingVersion: 20201221
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action:
+        - "secretsmanager:GetSecretValue"
+        - "secretsmanager:DescribeSecret"
+      Resource: "arn:aws:secretsmanager:us-east-1:*:secret:*"
+    - Effect: "Allow"
+      Action:
+        - "rds:DescribeDBInstances"
+      Resource: "*"
+
+package:
+  exclude:
+    - env/**
+  patterns:
+    - '!node_modules/.prisma/client/libquery_engine-*'
+    - 'node_modules/.prisma/client/libquery_engine-rhel-*'
+    - '!node_modules/prisma/libquery_engine-*'
+    - '!node_modules/@prisma/engines/**'
+
+custom:
+  pythonRequirements:
+    dockerizePip: non-linux
+  
+functions:
+  sqlalchemy_perf_test:
+    handler: python.handler.db_perf
+    runtime: python3.8
+    events:
+      - httpApi:
+          path: /poc-python
+          method: get
+  prisma_perf_test:
+    handler: node/handler.dbPerf
+    runtime: nodejs14.x
+    events:
+      - httpApi:
+          path: /poc-node
+          method: get
+
+resources:
+  Resources:
+    DbSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: 'Security Group created for db'
+        GroupName: 'TestPGDBSG'
+        VpcId: vpc-04a546ef213cd272a
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            CidrIp: 0.0.0.0/0
+            FromPort: 5432
+            ToPort: 5432
+    DBSubnetGroup:
+      Type: AWS::RDS::DBSubnetGroup
+      Properties:
+        DBSubnetGroupDescription: 'RDS required subnets in different availability zones'
+        SubnetIds:
+          - subnet-0f450384d21da9a81
+          - subnet-06cf8a304cfd3367e
+          - subnet-0d3799b4489d1a052
+    MyRDSSecret:
+      Type: 'AWS::SecretsManager::Secret'
+      Properties:
+        Name: MySecretForPOC
+        Description: "This secret has a dynamically generated secret password."
+        GenerateSecretString:
+          SecretStringTemplate: '{"username": "postgres"}'
+          GenerateStringKey: "password"
+          PasswordLength: 30
+          ExcludeCharacters: '"@/\'
+    DBInstance:
+      Type: AWS::RDS::DBInstance
+      Properties:
+        DBInstanceIdentifier: 'testdatabase'
+        DBInstanceClass: 'db.t3.micro'
+        AllocatedStorage: '20'
+        DBName: 'entitydatabase'
+        DBSubnetGroupName: !Ref DBSubnetGroup
+        VPCSecurityGroups:
+          - !Ref DbSecurityGroup
+        Engine: postgres
+        EngineVersion: '13.4'
+        MasterUsername: '{{resolve:secretsmanager:MySecretForPOC:SecretString:username}}'
+        MasterUserPassword: '{{resolve:secretsmanager:MySecretForPOC:SecretString:password}}'
+        PubliclyAccessible: true
+      DependsOn: MyRDSSecret
