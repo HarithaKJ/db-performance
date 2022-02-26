@@ -1,10 +1,10 @@
-# DB Perf test
+## DB Perf test
 SqlAlchemy vs Prisma
-# Install
+### Install
 npm i
 
-# Deploy
+### Deploy
 sls deploy
 
-# Run locally
+### Run locally
 sls offline
